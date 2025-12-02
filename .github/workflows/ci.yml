@@ -27,19 +27,21 @@ jobs:
 
     - name: 🔨 Run build
       run: npm run build
-
-    - name: 🔐 Setup SSH Key
+      
+    - name: 🔐 Setup & Convert SSH Key
       run: |
         echo "$KEY_B64" | base64 -d > ssh_key.pem
         chmod 600 ssh_key.pem
+        openssl rsa -in ssh_key.pem -out ssh_key_converted.pem
+      id: setup_ssh_key 
 
     - name: ⬆️ Deploy files to EC2
       uses: appleboy/scp-action@v0.1.7
       with:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USER }}
-        key: ssh_key.pem
-        source: "dist/*"
+        key: ssh_key_converted.pem 
+        source: "dist/*" 
         target: "/home/${{ secrets.EC2_USER }}/node-app"
 
     - name: 🏃 Run application on EC2 (Запуск)
@@ -47,17 +49,17 @@ jobs:
       with:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USER }}
-        key: ssh_key.pem 
+        key: ssh_key_converted.pem 
         script: |
           if ! command -v serve &> /dev/null; then
             sudo apt update
             sudo apt install -y nodejs npm
             sudo npm install -g serve
           fi
-
+          
           if pgrep -f "serve -s /home/${{ secrets.EC2_USER }}/node-app -l 80" > /dev/null; then
              pkill -f "serve -s /home/${{ secrets.EC2_USER }}/node-app -l 80"
           fi
-
+          
           nohup sudo serve -s /home/${{ secrets.EC2_USER }}/node-app -l 80 > /dev/null 2>&1 &
           echo "Deployment finished. App running on port 80."
