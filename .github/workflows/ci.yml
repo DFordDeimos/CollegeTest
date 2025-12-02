@@ -1,13 +1,18 @@
-name: CI Node.js Build
+name: CI/CD Node.js Deploy
 
 on:
   push:
     branches: [ main ]
 
 jobs:
-  build:
+  build_and_deploy:
     runs-on: ubuntu-latest
-
+    
+    env:
+      HOST: ${{ secrets.EC2_HOST }}
+      USER: ${{ secrets.EC2_USER }}
+      KEY_B64: ${{ secrets.EC2_SSH_KEY_B64 }}
+      
     steps:
     - name: ⬇️ Checkout code
       uses: actions/checkout@v4
@@ -23,9 +28,36 @@ jobs:
     - name: 🔨 Run build
       run: npm run build
 
-    - name: ⬆️ Upload build artifact
-      uses: actions/upload-artifact@v4
+    - name: 🔐 Setup SSH Key
+      run: |
+        echo "$KEY_B64" | base64 -d > ssh_key.pem
+        chmod 600 ssh_key.pem
+
+    - name: ⬆️ Deploy files to EC2
+      uses: appleboy/scp-action@v0.1.7
       with:
-        name: build-output
-        path: dist/
-        retention-days: 1
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ssh_key.pem
+        source: "dist/*"
+        target: "/home/${{ secrets.EC2_USER }}/node-app"
+
+    - name: 🏃 Run application on EC2 (Запуск)
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ssh_key.pem 
+        script: |
+          if ! command -v serve &> /dev/null; then
+            sudo apt update
+            sudo apt install -y nodejs npm
+            sudo npm install -g serve
+          fi
+
+          if pgrep -f "serve -s /home/${{ secrets.EC2_USER }}/node-app -l 80" > /dev/null; then
+             pkill -f "serve -s /home/${{ secrets.EC2_USER }}/node-app -l 80"
+          fi
+
+          nohup sudo serve -s /home/${{ secrets.EC2_USER }}/node-app -l 80 > /dev/null 2>&1 &
+          echo "Deployment finished. App running on port 80."
